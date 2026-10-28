@@ -3,14 +3,18 @@ package com.example.dynamicform
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -19,15 +23,9 @@ fun DynamicFormScreen(
     viewModel: DynamicFormViewModel,
     modifier: Modifier = Modifier
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showAddFieldDialog by remember { mutableStateOf(false) }
-    var successDialogMessage by remember { mutableStateOf<Map<String, Any>?>(null) }
-
-    LaunchedEffect(uiState.isSuccess, uiState.submissionResult) {
-        if (uiState.isSuccess && uiState.submissionResult != null) {
-            successDialogMessage = uiState.submissionResult
-        }
-    }
+    val submissionResult = uiState.submissionResult
 
     Scaffold(
         topBar = {
@@ -181,21 +179,47 @@ fun DynamicFormScreen(
                 )
             }
 
-            if (successDialogMessage != null) {
+            // Read the result directly from ViewModel state.
+            val submissionResult = uiState.submissionResult
+
+            if (uiState.isSuccess && submissionResult != null) {
                 AlertDialog(
-                    onDismissRequest = { successDialogMessage = null },
-                    title = { Text("Form Submitted Successfully!") },
+                    onDismissRequest = {
+                        // Notify the owner of the state when the dialog is dismissed.
+                        viewModel.onEvent(
+                            FormUserEvent.OnSubmissionResultDismissed
+                        )
+                    },
+                    title = {
+                        Text("Form Submitted Successfully!")
+                    },
                     text = {
-                        Column {
+                        Column(
+                            modifier = Modifier.verticalScroll(
+                                rememberScrollState()
+                            )
+                        ) {
                             Text("Validated Form Data:")
+
                             Spacer(modifier = Modifier.height(8.dp))
-                            successDialogMessage?.forEach { (key, value) ->
-                                Text("$key: $value", style = MaterialTheme.typography.bodyMedium)
+
+                            submissionResult.forEach { (key, value) ->
+                                Text(
+                                    text = "$key: $value",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                             }
                         }
                     },
                     confirmButton = {
-                        Button(onClick = { successDialogMessage = null }) {
+                        Button(
+                            onClick = {
+                                // Use the same dismissal path for the OK button.
+                                viewModel.onEvent(
+                                    FormUserEvent.OnSubmissionResultDismissed
+                                )
+                            }
+                        ) {
                             Text("OK")
                         }
                     }
@@ -210,8 +234,22 @@ fun AddFieldDialog(
     onDismiss: () -> Unit,
     onAddField: (FormFieldModel) -> Unit
 ) {
-    var label by remember { mutableStateOf("") }
-    var key by remember { mutableStateOf("") }
+    // Preserve the label across activity recreation.
+    var label by rememberSaveable {
+        mutableStateOf("")
+    }
+/***
+ * null means "generate the key automatically from the label".
+ * Once the user edits the key, store their manual value instead.
+ * An empty string is also a manual value; it should not trigger regeneration.
+ ***/
+
+    //Derive the automatic key instead of storing a second mutable value.
+    var manualKey by rememberSaveable {
+        mutableStateOf<String?>(null)
+    }
+
+    val fieldKey = manualKey ?: generateFieldKey(label)
     var selectedType by remember { mutableStateOf(FormFieldType.TEXT) }
     var placeholder by remember { mutableStateOf("") }
     var isRequired by remember { mutableStateOf(false) }
@@ -230,22 +268,19 @@ fun AddFieldDialog(
             ) {
                 OutlinedTextField(
                     value = label,
-                    onValueChange = {
-                        label = it
-                        if (key.isBlank()) {
-                            key = it.lowercase().replace("\\s+".toRegex(), "_")
-                        }
-                    },
+                    onValueChange = { label = it },
                     label = { Text("Field Label") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = key,
-                    onValueChange = { key = it },
-                    label = { Text("Field Key (Data Map Key)") },
+                    singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                OutlinedTextField(
+                    value = fieldKey,
+                    onValueChange = { manualKey = it },
+                    label = { Text("Field Key (Data Map Key)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 // Type selector dropdown
                 Box(modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(
@@ -305,7 +340,7 @@ fun AddFieldDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (label.isNotBlank() && key.isNotBlank()) {
+                    if (label.isNotBlank() && fieldKey.isNotBlank()) {
                         val rules = mutableListOf<ValidationRule>()
                         if (isRequired) {
                             rules.add(ValidationRule.Required)
@@ -321,8 +356,8 @@ fun AddFieldDialog(
 
                         val newField = FormFieldModel(
                             id = "field_" + UUID.randomUUID().toString().take(8),
-                            key = key,
-                            label = label,
+                            key = fieldKey.trim(),
+                            label = label.trim(),
                             type = selectedType,
                             placeholder = placeholder,
                             options = optionsList,
@@ -341,4 +376,17 @@ fun AddFieldDialog(
             }
         }
     )
+}
+
+private val WhitespaceRegex = "\\s+".toRegex()
+
+/***
+ * Convert a label such as " First Name " into "first_name".
+ * This formats the key; uniqueness and allowed-character validation are separate concerns.
+ ***/
+private fun generateFieldKey(label: String): String {
+    return label
+        .trim()
+        .lowercase()
+        .replace(WhitespaceRegex, "_")
 }

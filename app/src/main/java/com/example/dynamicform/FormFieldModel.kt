@@ -46,4 +46,7 @@ sealed interface FormUserEvent {
     data class OnReorderFields(val fromIndex: Int, val toIndex: Int) : FormUserEvent
     data object OnSubmitForm : FormUserEvent
     data object OnResetForm : FormUserEvent
+
+    //The user has dismissed the pending submission result.
+    data object OnSubmissionResultDismissed : FormUserEvent
 }

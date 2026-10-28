@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 class DynamicFormViewModel : ViewModel() {
+    private val fieldDefinitionValidator = FieldDefinitionValidator()
 
     private val initialFields = listOf(
         FormFieldModel(
@@ -107,7 +108,7 @@ class DynamicFormViewModel : ViewModel() {
                             field
                         }
                     }
-                    state.copy(fields = updatedFields, formError = null, isSuccess = false)
+                    state.copy(fields = updatedFields, formError = null, isSuccess = false, submissionResult = null)
                 }
             }
             is FormUserEvent.OnCheckboxToggled -> {
@@ -120,17 +121,27 @@ class DynamicFormViewModel : ViewModel() {
                             field
                         }
                     }
-                    state.copy(fields = updatedFields, formError = null, isSuccess = false)
+                    state.copy(fields = updatedFields, formError = null, isSuccess = false, submissionResult = null)
                 }
             }
             is FormUserEvent.OnAddField -> {
-                _uiState.update { state ->
-                    state.copy(fields = state.fields + event.fieldModel, formError = null)
-                }
+                addField(event.fieldModel)
             }
             is FormUserEvent.OnRemoveField -> {
                 _uiState.update { state ->
-                    state.copy(fields = state.fields.filter { it.id != event.id }, formError = null)
+                    // Ignore removal requests for fields that no longer exist.
+                    if (state.fields.none { it.id == event.id }) {
+                        state
+                    } else {
+                        state.copy(
+                            fields = state.fields.filterNot {
+                                it.id == event.id
+                            },
+                            formError = null,
+                            isSuccess = false,
+                            submissionResult = null
+                        )
+                    }
                 }
             }
             is FormUserEvent.OnReorderFields -> {
@@ -157,7 +168,17 @@ class DynamicFormViewModel : ViewModel() {
                     )
                 }
             }
+           is  FormUserEvent.OnSubmissionResultDismissed -> {
+                _uiState.update { state ->
+                    // Clear the result at its source, not only in the screen.
+                    state.copy(
+                        isSuccess = false,
+                        submissionResult = null
+                    )
+                }
+            }
         }
+
     }
 
     private fun validateField(field: FormFieldModel): FormFieldModel {
@@ -203,7 +224,11 @@ class DynamicFormViewModel : ViewModel() {
                 state.copy(
                     fields = validatedFields,
                     formError = "Please correct the validation errors before submitting.",
-                    isSuccess = false
+                    isSubmitting = false,
+                    isSuccess = false,
+
+                    // Do not retain an older successful result after a failed submission.
+                    submissionResult = null
                 )
             } else {
                 val resultMap = mutableMapOf<String, Any>()
@@ -224,4 +249,35 @@ class DynamicFormViewModel : ViewModel() {
             }
         }
     }
+
+    private fun addField(candidate: FormFieldModel) {
+        // Normalize once before checking and storing the definition.
+        val normalizedField = candidate.copy(
+            key = candidate.key.trim(),
+            label = candidate.label.trim(),
+            options = candidate.options.map { it.trim() }
+        )
+
+        _uiState.update { state ->
+            // Check against the same state snapshot used for the update.
+            val error = fieldDefinitionValidator.validate(
+                candidate = normalizedField,
+                existingFields = state.fields
+            )
+
+            if (error != null) {
+                state.copy(formError = error)
+            } else {
+                state.copy(
+                    fields = state.fields + normalizedField,
+                    formError = null,
+
+                    // A changed form no longer represents the previous submission.
+                    isSuccess = false,
+                    submissionResult = null
+                )
+            }
+        }
+    }
 }
+
