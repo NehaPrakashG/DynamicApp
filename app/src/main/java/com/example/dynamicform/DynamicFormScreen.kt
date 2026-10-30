@@ -24,15 +24,13 @@ fun DynamicFormScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showAddFieldDialog by remember { mutableStateOf(false) }
-    val submissionResult = uiState.submissionResult
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Dynamic Form Engine") },
                 actions = {
-                    IconButton(onClick = { showAddFieldDialog = true }) {
+                    IconButton(onClick = { viewModel.onEvent(FormUserEvent.OnAddFieldDialogOpened) }) {
                         Icon(Icons.Default.Add, contentDescription = "Add Field")
                     }
                 },
@@ -169,12 +167,14 @@ fun DynamicFormScreen(
                 }
             }
 
-            if (showAddFieldDialog) {
+            if (uiState.isAddFieldDialogVisible) {
                 AddFieldDialog(
-                    onDismiss = { showAddFieldDialog = false },
+                    errorMessage = uiState.addFieldError,
+                    onDismiss = { viewModel.onEvent(FormUserEvent.OnAddFieldDialogDismissed) },
+                    onInputChanged = { viewModel.onEvent(FormUserEvent.OnAddFieldInputChanged) },
+                    // The ViewModel closes the dialog only if the field is accepted.
                     onAddField = { newField ->
                         viewModel.onEvent(FormUserEvent.OnAddField(newField))
-                        showAddFieldDialog = false
                     }
                 )
             }
@@ -231,7 +231,9 @@ fun DynamicFormScreen(
 
 @Composable
 fun AddFieldDialog(
+    errorMessage: String?,
     onDismiss: () -> Unit,
+    onInputChanged: () -> Unit,
     onAddField: (FormFieldModel) -> Unit
 ) {
     // Preserve the label across activity recreation.
@@ -250,11 +252,15 @@ fun AddFieldDialog(
     }
 
     val fieldKey = manualKey ?: generateFieldKey(label)
-    var selectedType by remember { mutableStateOf(FormFieldType.TEXT) }
-    var placeholder by remember { mutableStateOf("") }
-    var isRequired by remember { mutableStateOf(false) }
-    var optionsText by remember { mutableStateOf("") }
+    // Preserve the remaining inputs across activity recreation as well.
+    var selectedType by rememberSaveable { mutableStateOf(FormFieldType.TEXT) }
+    var placeholder by rememberSaveable { mutableStateOf("") }
+    var isRequired by rememberSaveable { mutableStateOf(false) }
+    var optionsText by rememberSaveable { mutableStateOf("") }
     var expandedType by remember { mutableStateOf(false) }
+
+    val showsPlaceholder = selectedType != FormFieldType.CHECKBOX && selectedType != FormFieldType.RADIO && selectedType != FormFieldType.DROPDOWN
+    val showsOptions = selectedType == FormFieldType.DROPDOWN || selectedType == FormFieldType.RADIO
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -268,7 +274,10 @@ fun AddFieldDialog(
             ) {
                 OutlinedTextField(
                     value = label,
-                    onValueChange = { label = it },
+                    onValueChange = {
+                        label = it
+                        onInputChanged()
+                    },
                     label = { Text("Field Label") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -276,7 +285,10 @@ fun AddFieldDialog(
 
                 OutlinedTextField(
                     value = fieldKey,
-                    onValueChange = { manualKey = it },
+                    onValueChange = {
+                        manualKey = it
+                        onInputChanged()
+                    },
                     label = { Text("Field Key (Data Map Key)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -299,25 +311,32 @@ fun AddFieldDialog(
                                 onClick = {
                                     selectedType = type
                                     expandedType = false
+                                    onInputChanged()
                                 }
                             )
                         }
                     }
                 }
 
-                if (selectedType != FormFieldType.CHECKBOX && selectedType != FormFieldType.RADIO && selectedType != FormFieldType.DROPDOWN) {
+                if (showsPlaceholder) {
                     OutlinedTextField(
                         value = placeholder,
-                        onValueChange = { placeholder = it },
+                        onValueChange = {
+                            placeholder = it
+                            onInputChanged()
+                        },
                         label = { Text("Placeholder") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
-                if (selectedType == FormFieldType.DROPDOWN || selectedType == FormFieldType.RADIO) {
+                if (showsOptions) {
                     OutlinedTextField(
                         value = optionsText,
-                        onValueChange = { optionsText = it },
+                        onValueChange = {
+                            optionsText = it
+                            onInputChanged()
+                        },
                         label = { Text("Options (comma-separated)") },
                         placeholder = { Text("Option 1, Option 2, Option 3") },
                         modifier = Modifier.fillMaxWidth()
@@ -330,41 +349,53 @@ fun AddFieldDialog(
                 ) {
                     Checkbox(
                         checked = isRequired,
-                        onCheckedChange = { isRequired = it }
+                        onCheckedChange = {
+                            isRequired = it
+                            onInputChanged()
+                        }
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Required Field")
+                }
+
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    if (label.isNotBlank() && fieldKey.isNotBlank()) {
-                        val rules = mutableListOf<ValidationRule>()
-                        if (isRequired) {
-                            rules.add(ValidationRule.Required)
-                        }
-                        if (selectedType == FormFieldType.EMAIL) {
-                            rules.add(ValidationRule.Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,6}$", "Invalid email format"))
-                        }
-                        val optionsList = if (selectedType == FormFieldType.DROPDOWN || selectedType == FormFieldType.RADIO) {
-                            optionsText.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                        } else {
-                            emptyList()
-                        }
-
-                        val newField = FormFieldModel(
-                            id = "field_" + UUID.randomUUID().toString().take(8),
-                            key = fieldKey.trim(),
-                            label = label.trim(),
-                            type = selectedType,
-                            placeholder = placeholder,
-                            options = optionsList,
-                            validationRules = rules
-                        )
-                        onAddField(newField)
+                    // Always submit so the ViewModel can report blank or invalid input in the dialog.
+                    val rules = mutableListOf<ValidationRule>()
+                    if (isRequired) {
+                        rules.add(ValidationRule.Required)
                     }
+                    if (selectedType == FormFieldType.EMAIL) {
+                        rules.add(ValidationRule.Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,6}$", "Invalid email format"))
+                    }
+                    // Pass options raw; the ViewModel normalizes and the validator rejects blank ones.
+                    val optionsList = if (showsOptions && optionsText.isNotBlank()) {
+                        optionsText.split(",")
+                    } else {
+                        emptyList()
+                    }
+
+                    val newField = FormFieldModel(
+                        id = "field_" + UUID.randomUUID().toString().take(8),
+                        key = fieldKey,
+                        label = label,
+                        type = selectedType,
+                        // Drop a placeholder typed for a type whose input is now hidden.
+                        placeholder = if (showsPlaceholder) placeholder else "",
+                        options = optionsList,
+                        validationRules = rules
+                    )
+                    onAddField(newField)
                 }
             ) {
                 Text("Add")

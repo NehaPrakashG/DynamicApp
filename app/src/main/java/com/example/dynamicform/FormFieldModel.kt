@@ -35,12 +35,19 @@ data class DynamicFormUiState(
     val isSubmitting: Boolean = false,
     val isSuccess: Boolean = false,
     val submissionResult: Map<String, Any>? = null,
-    val formError: String? = null
+    val formError: String? = null,
+    // Owned by the ViewModel (and saved in its SavedStateHandle) so the dialog survives
+    // configuration changes and process death, and only closes once a field is accepted.
+    val isAddFieldDialogVisible: Boolean = false,
+    val addFieldError: String? = null
 )
 
 sealed interface FormUserEvent {
     data class OnFieldValueChanged(val id: String, val value: String) : FormUserEvent
     data class OnCheckboxToggled(val id: String, val isChecked: Boolean) : FormUserEvent
+    data object OnAddFieldDialogOpened : FormUserEvent
+    data object OnAddFieldDialogDismissed : FormUserEvent
+    data object OnAddFieldInputChanged : FormUserEvent
     data class OnAddField(val fieldModel: FormFieldModel) : FormUserEvent
     data class OnRemoveField(val id: String) : FormUserEvent
     data class OnReorderFields(val fromIndex: Int, val toIndex: Int) : FormUserEvent

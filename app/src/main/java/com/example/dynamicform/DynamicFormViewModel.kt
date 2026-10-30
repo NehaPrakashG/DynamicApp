@@ -1,12 +1,15 @@
 package com.example.dynamicform
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-class DynamicFormViewModel : ViewModel() {
+class DynamicFormViewModel(
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle()
+) : ViewModel() {
     private val fieldDefinitionValidator = FieldDefinitionValidator()
 
     private val initialFields = listOf(
@@ -93,7 +96,13 @@ class DynamicFormViewModel : ViewModel() {
         )
     )
 
-    private val _uiState = MutableStateFlow(DynamicFormUiState(fields = initialFields))
+    private val _uiState = MutableStateFlow(
+        DynamicFormUiState(
+            fields = initialFields,
+            // Restore the open dialog after process death; its inputs use rememberSaveable.
+            isAddFieldDialogVisible = savedStateHandle[KEY_ADD_FIELD_DIALOG_VISIBLE] ?: false
+        )
+    )
     val uiState: StateFlow<DynamicFormUiState> = _uiState.asStateFlow()
 
     fun onEvent(event: FormUserEvent) {
@@ -122,6 +131,23 @@ class DynamicFormViewModel : ViewModel() {
                         }
                     }
                     state.copy(fields = updatedFields, formError = null, isSuccess = false, submissionResult = null)
+                }
+            }
+            is FormUserEvent.OnAddFieldDialogOpened -> {
+                _uiState.update { state ->
+                    // The user is now editing the form's structure, so an earlier submit error is stale.
+                    state.copy(isAddFieldDialogVisible = true, addFieldError = null, formError = null)
+                }
+            }
+            is FormUserEvent.OnAddFieldInputChanged -> {
+                _uiState.update { state ->
+                    // The error described the previous input, not the edited one.
+                    state.copy(addFieldError = null)
+                }
+            }
+            is FormUserEvent.OnAddFieldDialogDismissed -> {
+                _uiState.update { state ->
+                    state.copy(isAddFieldDialogVisible = false, addFieldError = null)
                 }
             }
             is FormUserEvent.OnAddField -> {
@@ -158,13 +184,16 @@ class DynamicFormViewModel : ViewModel() {
                 submitForm()
             }
             is FormUserEvent.OnResetForm -> {
-                _uiState.update {
-                    DynamicFormUiState(
+                _uiState.update { state ->
+                    state.copy(
                         fields = initialFields.map { it.copy(currentValue = "", isChecked = false, errorMessage = null) },
                         isSubmitting = false,
                         isSuccess = false,
                         submissionResult = null,
-                        formError = null
+                        formError = null,
+                        // Resetting also discards any field definition in progress.
+                        isAddFieldDialogVisible = false,
+                        addFieldError = null
                     )
                 }
             }
@@ -179,6 +208,7 @@ class DynamicFormViewModel : ViewModel() {
             }
         }
 
+        savedStateHandle[KEY_ADD_FIELD_DIALOG_VISIBLE] = _uiState.value.isAddFieldDialogVisible
     }
 
     private fun validateField(field: FormFieldModel): FormFieldModel {
@@ -251,7 +281,7 @@ class DynamicFormViewModel : ViewModel() {
     }
 
     private fun addField(candidate: FormFieldModel) {
-        // Normalize once before checking and storing the definition.
+        // The single place where dialog input is normalized; the screen passes raw input.
         val normalizedField = candidate.copy(
             key = candidate.key.trim(),
             label = candidate.label.trim(),
@@ -259,6 +289,11 @@ class DynamicFormViewModel : ViewModel() {
         )
 
         _uiState.update { state ->
+            // Ignore a late submission (e.g. a double tap) after the dialog has closed.
+            if (!state.isAddFieldDialogVisible) {
+                return@update state
+            }
+
             // Check against the same state snapshot used for the update.
             val error = fieldDefinitionValidator.validate(
                 candidate = normalizedField,
@@ -266,11 +301,14 @@ class DynamicFormViewModel : ViewModel() {
             )
 
             if (error != null) {
-                state.copy(formError = error)
+                // Keep the dialog open so the user can correct the definition.
+                state.copy(addFieldError = error)
             } else {
                 state.copy(
                     fields = state.fields + normalizedField,
                     formError = null,
+                    isAddFieldDialogVisible = false,
+                    addFieldError = null,
 
                     // A changed form no longer represents the previous submission.
                     isSuccess = false,
@@ -279,5 +317,8 @@ class DynamicFormViewModel : ViewModel() {
             }
         }
     }
-}
 
+    private companion object {
+        const val KEY_ADD_FIELD_DIALOG_VISIBLE = "add_field_dialog_visible"
+    }
+}
