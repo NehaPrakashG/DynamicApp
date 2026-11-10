@@ -1,0 +1,48 @@
+{
+  "id": "insurance_quote",
+  "version": 2,
+  "title": "Term life quote",
+  "fields": [
+    {
+      "key": "coverage_amount",
+      "label": "Coverage amount (USD)",
+      "type": "dropdown",
+      "options": ["$100,000", "$250,000", "$500,000", "$1,000,000"],
+      "rules": [{ "type": "required" }]
+    },
+    {
+      "key": "term_years",
+      "label": "Term length",
+      "type": "radio",
+      "options": ["10 years", "20 years", "30 years"],
+      "rules": [{ "type": "required" }]
+    },
+    {
+      "key": "zip",
+      "label": "ZIP code",
+      "type": "number",
+      "placeholder": "e.g. 60601",
+      "rules": [
+        { "type": "required" },
+        { "type": "regex", "pattern": "^\\d{5}$", "message": "Enter a 5-digit ZIP code" }
+      ]
+    },
+    {
+      "key": "tobacco",
+      "label": "I have used tobacco or nicotine in the last 12 months",
+      "type": "checkbox"
+    },
+    {
+      "key": "signature",
+      "label": "E-signature",
+      "type": "signature_pad",
+      "rules": [{ "type": "required" }]
+    },
+    {
+      "key": "consent",
+      "label": "I consent to be contacted about this quote",
+      "type": "checkbox",
+      "rules": [{ "type": "required" }]
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "id": "contact",
+  "version": 1,
+  "title": "Contact details",
+  "fields": [
+    {
+      "key": "full_name",
+      "label": "Full Name",
+      "type": "text",
+      "placeholder": "Enter your full name",
+      "rules": [{ "type": "required" }, { "type": "min_length", "length": 2 }]
+    },
+    {
+      "key": "email",
+      "label": "Email Address",
+      "type": "email",
+      "placeholder": "name@example.com",
+      "rules": [{ "type": "required" }]
+    },
+    {
+      "key": "age",
+      "label": "Age",
+      "type": "number",
+      "placeholder": "Enter your age",
+      "rules": [{ "type": "required" }, { "type": "max_length", "length": 3 }]
+    },
+    {
+      "key": "bio",
+      "label": "Biography",
+      "type": "textarea",
+      "placeholder": "Tell us about yourself...",
+      "rules": [{ "type": "min_length", "length": 10 }, { "type": "max_length", "length": 500 }]
+    },
+    {
+      "key": "gender",
+      "label": "Gender",
+      "type": "radio",
+      "options": ["Male", "Female", "Other", "Prefer not to say"],
+      "rules": [{ "type": "required" }]
+    },
+    {
+      "key": "country",
+      "label": "Country",
+      "type": "dropdown",
+      "options": ["United States", "Canada", "United Kingdom", "Australia", "Germany", "India"],
+      "rules": [{ "type": "required" }]
+    },
+    {
+      "key": "birthdate",
+      "label": "Date of Birth",
+      "type": "date_picker",
+      "placeholder": "YYYY-MM-DD",
+      "rules": [{ "type": "required" }]
+    },
+    {
+      "key": "terms",
+      "label": "I agree to the terms and conditions",
+      "type": "checkbox",
+      "rules": [{ "type": "required" }]
+    }
+  ]
+}
